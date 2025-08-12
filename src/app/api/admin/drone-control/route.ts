@@ -265,7 +265,7 @@ function generateRealisticTelemetry(droneId: string, status: string, context: {
 }
 
 // Export function to check if drone is under manual override
-export function isDroneUnderManualOverride(droneId: string): boolean {
+function isDroneUnderManualOverride(droneId: string): boolean {
   const state = droneStates.get(droneId);
   if (!state?.manualOverride) return false;
   
