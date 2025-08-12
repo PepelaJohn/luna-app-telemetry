@@ -1,6 +1,44 @@
+// import dbConnect from './mongodb';
 import Telemetry from '../models/Telemetry';
 import { TelemetryData } from '@/types/telemetry';
 import { connectDB } from './db';
+
+// Import the drone states from the admin control
+let droneStates: Map<string, any> | null = null;
+
+// Dynamic import to avoid circular dependency
+async function getDroneStates() {
+  if (!droneStates) {
+    try {
+      const controlModule = await import('../app/api/admin/drone-control/const');
+      droneStates = controlModule.droneStates;
+    } catch (error) {
+      console.error('Failed to import drone states:', error);
+      droneStates = new Map();
+    }
+  }
+  return droneStates;
+}
+
+function isDroneUnderManualOverride(droneId: string): boolean {
+  if (!droneStates) return false;
+  
+  const state = droneStates.get(droneId);
+  if (!state?.manualOverride) return false;
+  
+  const now = new Date();
+  if (state.overrideExpiry && now > state.overrideExpiry) {
+    // Override expired, clean it up
+    droneStates.set(droneId, {
+      ...state,
+      manualOverride: false,
+      overrideExpiry: undefined,
+    });
+    return false;
+  }
+  
+  return true;
+}
 
 interface DroneProfile {
   id: string;
@@ -14,6 +52,7 @@ interface DroneProfile {
   missionPhase: 'idle' | 'preparing' | 'flying' | 'delivering' | 'returning';
   missionStartTime?: Date;
   destination?: { lat: number; lng: number; name: string };
+  manualOverride?: boolean;
 }
 
 class AutoDroneSimulator {
@@ -37,7 +76,7 @@ class AutoDroneSimulator {
       {
         id: 'A1',
         name: 'Drone A1',
-        baseLocation: { lat: -1.2921, lng: 36.8219 }, // Nairobi City Centre
+        baseLocation: { lat: -1.2921, lng: 36.8219 },
         batteryDecayRate: 0.8,
         maxSpeed: 65,
         operatingAltitude: 150,
@@ -45,7 +84,7 @@ class AutoDroneSimulator {
       {
         id: 'A2',
         name: 'Drone A2',
-        baseLocation: { lat: -1.3032, lng: 36.8356 }, // Nairobi Hospital area
+        baseLocation: { lat: -1.3032, lng: 36.8356 },
         batteryDecayRate: 0.7,
         maxSpeed: 70,
         operatingAltitude: 180,
@@ -53,7 +92,7 @@ class AutoDroneSimulator {
       {
         id: 'B1',
         name: 'Drone B1',
-        baseLocation: { lat: -1.2745, lng: 36.8098 }, // Westlands
+        baseLocation: { lat: -1.2745, lng: 36.8098 },
         batteryDecayRate: 0.9,
         maxSpeed: 60,
         operatingAltitude: 120,
@@ -61,7 +100,7 @@ class AutoDroneSimulator {
       {
         id: 'B2',
         name: 'Drone B2',
-        baseLocation: { lat: -1.3167, lng: 36.8833 }, // Eastlands
+        baseLocation: { lat: -1.3167, lng: 36.8833 },
         batteryDecayRate: 0.6,
         maxSpeed: 75,
         operatingAltitude: 200,
@@ -71,7 +110,7 @@ class AutoDroneSimulator {
     initialProfiles.forEach(profile => {
       this.profiles.set(profile.id, {
         ...profile,
-        currentBattery: 85 + Math.random() * 15, // Start with 85-100%
+        currentBattery: 85 + Math.random() * 15,
         currentLocation: { ...profile.baseLocation },
         missionPhase: 'idle',
       });
@@ -81,25 +120,25 @@ class AutoDroneSimulator {
   async start() {
     if (this.isRunning) return;
     
-    console.log('🚀 Starting auto drone simulation...');
+    console.log('🚀 Starting auto drone simulation with manual override support...');
     
     try {
       await connectDB();
+      await getDroneStates(); // Initialize drone states reference
       
-      // Generate initial historical data if database is empty
       await this.initializeDatabase();
       
       this.isRunning = true;
       
-      // Generate data every 15 seconds for realistic real-time updates
+      // Generate data every 20 seconds (reduced frequency to avoid conflicts)
       this.interval = setInterval(async () => {
         await this.generateAndSaveTelemetry();
-      }, 15000);
+      }, 20000);
       
-      // Generate initial data immediately
+      // Generate initial data
       await this.generateAndSaveTelemetry();
       
-      console.log('✅ Auto simulation started - generating data every 15 seconds');
+      console.log('✅ Auto simulation started with manual override support');
     } catch (error) {
       console.error('❌ Failed to start simulation:', error);
     }
@@ -122,7 +161,7 @@ class AutoDroneSimulator {
       
       if (count === 0) {
         console.log('📊 Database is empty, generating initial historical data...');
-        await this.generateHistoricalData(6); // 6 hours of history
+        await this.generateHistoricalData(6);
         console.log('✅ Initial historical data generated');
       } else {
         console.log(`📊 Database has ${count} existing records`);
@@ -134,7 +173,7 @@ class AutoDroneSimulator {
 
   private async generateHistoricalData(hours: number) {
     const now = new Date();
-    const intervalMinutes = 3; // Every 3 minutes
+    const intervalMinutes = 3;
     const totalPoints = (hours * 60) / intervalMinutes;
     const batchData: TelemetryData[] = [];
 
@@ -147,7 +186,6 @@ class AutoDroneSimulator {
       });
     }
 
-    // Insert in batches
     const batchSize = 100;
     for (let i = 0; i < batchData.length; i += batchSize) {
       const batch = batchData.slice(i, i + batchSize);
@@ -161,8 +199,9 @@ class AutoDroneSimulator {
     const activityLevel = isBusinessHours && !isWeekend ? 0.6 : 0.2;
     const isActive = Math.random() < activityLevel;
 
+    const statusOptions = ['Standby', 'Active', 'In Flight', 'Delivered', 'Returning'];
+
     if (isActive) {
-      // Active mission data
       const missionProgress = Math.random();
       const battery = 90 - missionProgress * 40 + Math.random() * 10;
       const temperature = 32 + missionProgress * 8 + Math.random() * 4;
@@ -181,10 +220,9 @@ class AutoDroneSimulator {
         altitude: profile.operatingAltitude + Math.random() * 40 - 20,
         lat: Math.round((profile.baseLocation.lat + latOffset) * 1000000) / 1000000,
         lng: Math.round((profile.baseLocation.lng + lngOffset) * 1000000) / 1000000,
-        status: ['In Transit', 'Returning', 'Delivered'][Math.floor(Math.random() * 3)] as any,
+        status: statusOptions[Math.floor(Math.random() * statusOptions.length)] as any,
       };
     } else {
-      // Idle data
       return {
         droneId: profile.id,
         timestamp,
@@ -206,25 +244,31 @@ class AutoDroneSimulator {
       const now = new Date();
 
       for (const [droneId, profile] of this.profiles) {
-        // Update drone state
+        // CHECK FOR MANUAL OVERRIDE - Skip auto-update if drone is manually controlled
+        if (isDroneUnderManualOverride(droneId)) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`⏸️  Skipping auto-update for ${droneId} - under manual control`);
+          }
+          continue; // Skip this drone, don't generate automatic data
+        }
+
+        // Only update if NOT under manual override
         this.updateDroneState(profile);
-        
-        // Generate telemetry based on current state
         const data = this.generateCurrentTelemetry(profile, now);
         telemetryData.push(data);
       }
 
-      // Save to database
-      await Telemetry.insertMany(telemetryData);
-      
-      // Log summary (only in development)
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`📡 [${now.toLocaleTimeString()}] Generated telemetry:`);
-        telemetryData.forEach(data => {
-          const location = data.speed > 0 ? 
-            `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}` : 'base';
-          console.log(`   ${data.droneId}: ${data.status.padEnd(11)} | ${data.battery}% | ${Math.round(data.speed)} km/h | ${location}`);
-        });
+      if (telemetryData.length > 0) {
+        await Telemetry.insertMany(telemetryData);
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`📡 [${now.toLocaleTimeString()}] Auto-generated telemetry for ${telemetryData.length} drones:`);
+          telemetryData.forEach(data => {
+            const location = data.speed > 0 ? 
+              `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}` : 'base';
+            console.log(`   ${data.droneId}: ${data.status.padEnd(11)} | ${data.battery}% | ${Math.round(data.speed)} km/h | ${location}`);
+          });
+        }
       }
     } catch (error) {
       console.error('❌ Failed to generate/save telemetry:', error);
@@ -234,66 +278,60 @@ class AutoDroneSimulator {
   private updateDroneState(profile: DroneProfile) {
     const now = new Date();
     
+    // Realistic state transitions with proper constraints
     switch (profile.missionPhase) {
       case 'idle':
-        // Chance to start a new mission during business hours
         const isBusinessHours = now.getHours() >= 8 && now.getHours() <= 18;
-        const shouldStartMission = isBusinessHours && Math.random() < 0.15; // 15% chance every cycle
+        const shouldStartMission = isBusinessHours && Math.random() < 0.10 && profile.currentBattery > 50;
         
-        if (shouldStartMission && profile.currentBattery > 40) {
+        if (shouldStartMission) {
           profile.missionPhase = 'preparing';
           profile.missionStartTime = now;
           profile.destination = this.destinations[Math.floor(Math.random() * this.destinations.length)];
         } else {
-          // Charge battery when idle
-          profile.currentBattery = Math.min(100, profile.currentBattery + 0.5);
+          profile.currentBattery = Math.min(100, profile.currentBattery + 0.3);
         }
         break;
 
       case 'preparing':
-        // Preparation takes 1-2 cycles, then start flying
-        if (Math.random() < 0.7) {
+        if (Math.random() < 0.5) {
           profile.missionPhase = 'flying';
         }
         break;
 
       case 'flying':
-        // Move towards destination and drain battery
         if (profile.destination) {
           this.moveTowardsDestination(profile, profile.destination);
-          profile.currentBattery -= profile.batteryDecayRate;
+          profile.currentBattery -= profile.batteryDecayRate * 0.8;
           
-          // Check if reached destination or battery low
           const distanceToDestination = this.calculateDistance(
             profile.currentLocation, 
             profile.destination
           );
           
-          if (distanceToDestination < 0.005 || Math.random() < 0.1) { // ~500m or 10% chance
+          if (distanceToDestination < 0.005 || Math.random() < 0.08) {
             profile.missionPhase = 'delivering';
           }
         }
         break;
 
       case 'delivering':
-        // Delivering takes a few cycles
         profile.currentBattery -= 0.2;
-        if (Math.random() < 0.4) { // 40% chance to finish delivery
+        if (Math.random() < 0.3) {
           profile.missionPhase = 'returning';
         }
         break;
 
       case 'returning':
-        // Return to base
         this.moveTowardsDestination(profile, profile.baseLocation);
-        profile.currentBattery -= profile.batteryDecayRate * 0.8; // Less drain returning
+        profile.currentBattery -= profile.batteryDecayRate * 0.6;
         
         const distanceToBase = this.calculateDistance(
           profile.currentLocation, 
           profile.baseLocation
         );
         
-        if (distanceToBase < 0.002 || Math.random() < 0.15) { // ~200m or 15% chance
+        if (distanceToBase < 0.002 || Math.random() < 0.12) {
           profile.missionPhase = 'idle';
           profile.currentLocation = { ...profile.baseLocation };
           profile.destination = undefined;
@@ -302,7 +340,6 @@ class AutoDroneSimulator {
         break;
     }
 
-    // Ensure battery doesn't go below 15%
     profile.currentBattery = Math.max(15, profile.currentBattery);
   }
 
@@ -311,9 +348,9 @@ class AutoDroneSimulator {
     destination: { lat: number; lng: number }
   ) {
     const speed = profile.maxSpeed;
-    const timeStep = 15 / 3600; // 15 seconds in hours
-    const distanceStep = speed * timeStep; // km
-    const degreeStep = distanceStep / 111; // Rough conversion to degrees
+    const timeStep = 20 / 3600; // 20 seconds in hours
+    const distanceStep = speed * timeStep;
+    const degreeStep = distanceStep / 111;
     
     const latDiff = destination.lat - profile.currentLocation.lat;
     const lngDiff = destination.lng - profile.currentLocation.lng;
@@ -339,23 +376,24 @@ class AutoDroneSimulator {
     let status: TelemetryData['status'];
     let speed = 0;
     let altitude = 0;
-    let temperature = 26 + Math.random() * 4; // Base temperature
+    let temperature = 26 + Math.random() * 4;
 
+    // Map internal mission phases to realistic drone statuses
     switch (profile.missionPhase) {
       case 'idle':
         status = 'Standby';
         temperature = 25 + Math.random() * 3;
         break;
       case 'preparing':
-        status = 'Standby';
+        status = 'Pre-Flight';
         speed = 0;
-        temperature = 28 + Math.random() * 3; // Warming up
+        temperature = 28 + Math.random() * 3;
         break;
       case 'flying':
         status = 'In Flight';
         speed = profile.maxSpeed * (0.8 + Math.random() * 0.2);
         altitude = profile.operatingAltitude + Math.random() * 30 - 15;
-        temperature = 35 + Math.random() * 6; // Hot during flight
+        temperature = 35 + Math.random() * 6;
         break;
       case 'delivering':
         status = 'Delivered';
@@ -371,10 +409,9 @@ class AutoDroneSimulator {
         break;
     }
 
-    // Add some realistic environmental variations
     const timeOfDay = timestamp.getHours();
-    const tempAdjustment = Math.sin((timeOfDay - 6) / 12 * Math.PI) * 3; // Day/night cycle
-    const humidityBase = 65 - Math.abs(timeOfDay - 14) * 1.5; // Lower humidity mid-day
+    const tempAdjustment = Math.sin((timeOfDay - 6) / 12 * Math.PI) * 3;
+    const humidityBase = 65 - Math.abs(timeOfDay - 14) * 1.5;
 
     return {
       droneId: profile.id,
@@ -400,12 +437,12 @@ class AutoDroneSimulator {
         battery: p.currentBattery,
         phase: p.missionPhase,
         location: p.currentLocation,
+        manualOverride: isDroneUnderManualOverride(p.id),
       })),
     };
   }
 }
 
-// Singleton instance
 let autoSimulator: AutoDroneSimulator | null = null;
 
 export function getAutoSimulator(): AutoDroneSimulator {
@@ -415,14 +452,12 @@ export function getAutoSimulator(): AutoDroneSimulator {
   return autoSimulator;
 }
 
-// Auto-start when server starts (only once)
 let hasStarted = false;
 
 export async function initializeAutoSimulation() {
   if (hasStarted) return;
   hasStarted = true;
   
-  // Small delay to ensure database is ready
   setTimeout(async () => {
     const simulator = getAutoSimulator();
     await simulator.start();

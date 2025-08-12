@@ -1,19 +1,17 @@
 'use client';
-import dynamic from 'next/dynamic';
+
 import React, { useState, useEffect } from 'react';
 import { TelemetryData, DroneInfo } from '@/types/telemetry';
 import { DroneSelector } from '@/components/dashboard/DroneSelector';
 import { TelemetryGrid } from '@/components/dashboard/TelemetryGrid';
 // import { DroneMap } from '@/components/dashboard/DroneMap';
 const DroneMap = dynamic(() => import('@/components/dashboard/DroneMap'), { ssr: false });
-
-
 import { HistoricalChart } from '@/components/dashboard/HistoricalChart';
 import { QuickControl } from '@/components/admin/QuickControl';
 import { Card, CardContent } from '@/components/ui/card';
 import { getTimeRangeInMs } from '@/lib/utils';
 import { Activity, Wifi, Database } from 'lucide-react';
-
+import dynamic from 'next/dynamic';
 
 export default function DashboardPage() {
   const [drones, setDrones] = useState<DroneInfo[]>([]);
@@ -24,12 +22,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [hasMounted, setHasMounted] = useState(false);
-
-useEffect(() => {
-  setHasMounted(true);
-}, []);
-
 
   // Fetch available drones
   useEffect(() => {
@@ -142,12 +134,9 @@ useEffect(() => {
             </p>
             <div className="flex items-center space-x-2">
               <div className="w-2 h-2 rounded-full bg-green-400"></div>
-              {hasMounted && (
-  <span className="text-xs text-muted-foreground">
-    Last update: {lastUpdate.toLocaleTimeString()}
-  </span>
-)}
-
+              <span className="text-xs text-muted-foreground">
+                Last update: {lastUpdate.toLocaleTimeString()}
+              </span>
             </div>
           </div>
         </div>
@@ -198,7 +187,7 @@ useEffect(() => {
 
           {/* Map and Analytics */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {hasMounted && <DroneMap telemetry={currentTelemetry} />}
+            <DroneMap telemetry={currentTelemetry} />
             <div className="lg:col-span-1">
               <HistoricalChart data={historicalData} timeRange={timeRange} />
             </div>

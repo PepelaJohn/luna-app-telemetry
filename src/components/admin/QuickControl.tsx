@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,13 +8,14 @@ import {
   Play, 
   Square, 
   Plane, 
-  Battery, 
   Settings,
   Eye,
   EyeOff,
   Zap,
   AlertTriangle,
-  CheckCircle
+  CheckCircle,
+  Clock,
+  Unlock
 } from 'lucide-react';
 
 interface DroneControlState {
@@ -20,19 +23,21 @@ interface DroneControlState {
   status: string;
   isOnline: boolean;
   battery?: number;
+  manualOverride?: boolean;
+  overrideExpiry?: string;
 }
 
 const DRONE_STATUSES = [
-  { value: 'Powered Off', label: 'Powered Off', color: 'text-gray-400', icon: Power },
-  { value: 'Standby', label: 'Standby', color: 'text-yellow-400', icon: Square },
-  { value: 'Pre-Flight', label: 'Pre-Flight', color: 'text-blue-400', icon: Settings },
-  { value: 'Active', label: 'Active', color: 'text-green-400', icon: CheckCircle },
-  { value: 'In Flight', label: 'In Flight', color: 'text-cyan-400', icon: Plane },
-  { value: 'Landing', label: 'Landing', color: 'text-orange-400', icon: Plane },
-  { value: 'Delivered', label: 'Delivered', color: 'text-green-500', icon: CheckCircle },
-  { value: 'Returning', label: 'Returning', color: 'text-purple-400', icon: Plane },
-  { value: 'Maintenance', label: 'Maintenance', color: 'text-orange-500', icon: Settings },
-  { value: 'Emergency', label: 'Emergency', color: 'text-red-500', icon: AlertTriangle },
+  { value: 'Powered Off', label: 'Power Off', color: 'bg-gray-600', icon: Power },
+  { value: 'Standby', label: 'Standby', color: 'bg-yellow-600', icon: Square },
+  { value: 'Pre-Flight', label: 'Pre-Flight', color: 'bg-blue-600', icon: Settings },
+  { value: 'Active', label: 'Active', color: 'bg-green-600', icon: CheckCircle },
+  { value: 'In Flight', label: 'In Flight', color: 'bg-cyan-600', icon: Plane },
+  { value: 'Landing', label: 'Landing', color: 'bg-orange-600', icon: Plane },
+  { value: 'Delivered', label: 'Delivered', color: 'bg-green-700', icon: CheckCircle },
+  { value: 'Returning', label: 'Returning', color: 'bg-purple-600', icon: Plane },
+  { value: 'Maintenance', label: 'Maintenance', color: 'bg-orange-700', icon: Settings },
+  { value: 'Emergency', label: 'Emergency', color: 'bg-red-700', icon: AlertTriangle },
 ];
 
 const DRONES = ['A1', 'A2', 'B1', 'B2'];
@@ -42,15 +47,14 @@ export function QuickControl() {
   const [isLoading, setIsLoading] = useState(false);
   const [feedback, setFeedback] = useState<string>('');
   const [droneStates, setDroneStates] = useState<DroneControlState[]>([]);
+  const [overrideDuration, setOverrideDuration] = useState(10); // Default 10 minutes
 
-  // Keyboard shortcut to toggle admin panel (Ctrl+Shift+A)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'A') {
         e.preventDefault();
         setIsVisible(!isVisible);
       }
-      // ESC to hide
       if (e.key === 'Escape') {
         setIsVisible(false);
       }
@@ -60,10 +64,11 @@ export function QuickControl() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isVisible]);
 
-  // Load current drone states
   useEffect(() => {
     if (isVisible) {
       fetchDroneStates();
+      const interval = setInterval(fetchDroneStates, 5000); // Refresh every 5 seconds
+      return () => clearInterval(interval);
     }
   }, [isVisible]);
 
@@ -79,7 +84,11 @@ export function QuickControl() {
     }
   };
 
-  const updateDroneStatus = async (droneId: string, status: string, options: { battery?: number; isOnline?: boolean } = {}) => {
+  const updateDroneStatus = async (
+    droneId: string, 
+    status: string, 
+    options: { battery?: number; isOnline?: boolean; duration?: number } = {}
+  ) => {
     setIsLoading(true);
     setFeedback('');
 
@@ -90,14 +99,15 @@ export function QuickControl() {
         body: JSON.stringify({
           droneId,
           status,
-          isOnline: options.isOnline !== undefined ? options.isOnline : true,
+          isOnline: options.isOnline !== undefined ? options.isOnline : (status !== 'Powered Off'),
           battery: options.battery,
+          duration: (options.duration || overrideDuration) * 60 * 1000, // Convert minutes to ms
         }),
       });
 
       if (response.ok) {
         const result = await response.json();
-        setFeedback(`✅ ${result.message}`);
+        setFeedback(`✅ ${result.message} (Override: ${overrideDuration}min)`);
         
         // Update local state
         setDroneStates(prev => {
@@ -105,14 +115,15 @@ export function QuickControl() {
           updated.push({
             droneId,
             status,
-            isOnline: options.isOnline !== undefined ? options.isOnline : true,
+            isOnline: options.isOnline !== undefined ? options.isOnline : (status !== 'Powered Off'),
             battery: options.battery,
+            manualOverride: true,
+            overrideExpiry: result.overrideExpiry,
           });
           return updated;
         });
 
-        // Clear feedback after 2 seconds
-        setTimeout(() => setFeedback(''), 2000);
+        setTimeout(() => setFeedback(''), 3000);
       } else {
         setFeedback('❌ Failed to update drone status');
       }
@@ -123,7 +134,6 @@ export function QuickControl() {
     }
   };
 
-  // Quick action buttons
   const quickActions = [
     {
       label: 'Start All Drones',
@@ -136,6 +146,26 @@ export function QuickControl() {
       icon: Play,
     },
     {
+      label: 'Launch Mission',
+      action: () => {
+        DRONES.forEach(droneId => 
+          updateDroneStatus(droneId, 'In Flight', { battery: 70 + Math.random() * 20 })
+        );
+      },
+      color: 'bg-cyan-600 hover:bg-cyan-700',
+      icon: Plane,
+    },
+    {
+      label: 'Return to Base',
+      action: () => {
+        DRONES.forEach(droneId => 
+          updateDroneStatus(droneId, 'Returning', { battery: 40 + Math.random() * 30 })
+        );
+      },
+      color: 'bg-purple-600 hover:bg-purple-700',
+      icon: Plane,
+    },
+    {
       label: 'Power Off All',
       action: () => {
         DRONES.forEach(droneId => 
@@ -145,66 +175,56 @@ export function QuickControl() {
       color: 'bg-red-600 hover:bg-red-700',
       icon: Power,
     },
-    {
-      label: 'Set to Standby',
-      action: () => {
-        DRONES.forEach(droneId => 
-          updateDroneStatus(droneId, 'Standby', { battery: 90 + Math.random() * 10 })
-        );
-      },
-      color: 'bg-yellow-600 hover:bg-yellow-700',
-      icon: Square,
-    },
-    {
-      label: 'Emergency Stop',
-      action: () => {
-        DRONES.forEach(droneId => 
-          updateDroneStatus(droneId, 'Emergency', { battery: Math.random() * 30 + 20 })
-        );
-      },
-      color: 'bg-red-700 hover:bg-red-800',
-      icon: AlertTriangle,
-    },
   ];
 
-  // if (!isVisible) {
-  //   return (
-  //     <div className="fixed bottom-4 right-4 z-50">
-  //       <Button
-  //         onClick={() => setIsVisible(true)}
-  //         variant="outline"
-  //         size="sm"
-  //         className="bg-card/90 backdrop-blur-sm border-border/50"
-  //       >
-  //         <Eye className="h-4 w-4 mr-2" />
-  //         Admin
-  //       </Button>
-  //     </div>
-  //   );
-  // }
   if (!isVisible) {
     return (
-      <>
-       
-      </>
+      <div className="fixed bottom-4 right-4 z-50">
+        <Button
+          onClick={() => setIsVisible(true)}
+          variant="outline"
+          size="sm"
+          className="bg-card/90 backdrop-blur-sm border-border/50"
+        >
+          <Eye className="h-4 w-4 mr-2" />
+          Admin
+        </Button>
+      </div>
     );
   }
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-4xl max-h-[90vh] overflow-auto bg-card/95 backdrop-blur border-border">
+      <Card className="w-full max-w-5xl max-h-[90vh] overflow-auto bg-card/95 backdrop-blur border-border">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center space-x-2">
             <Zap className="h-5 w-5 text-primary" />
             <span>Live Demo Control Panel</span>
           </CardTitle>
-          <Button
-            onClick={() => setIsVisible(false)}
-            variant="ghost"
-            size="sm"
-          >
-            <EyeOff className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Override Duration:</span>
+              <select
+                value={overrideDuration}
+                onChange={(e) => setOverrideDuration(Number(e.target.value))}
+                className="bg-secondary border border-border rounded px-2 py-1 text-sm"
+              >
+                <option value={5}>5 min</option>
+                <option value={10}>10 min</option>
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>1 hour</option>
+              </select>
+            </div>
+            <Button
+              onClick={() => setIsVisible(false)}
+              variant="ghost"
+              size="sm"
+            >
+              <EyeOff className="h-4 w-4" />
+            </Button>
+          </div>
         </CardHeader>
         
         <CardContent className="space-y-6">
@@ -215,9 +235,25 @@ export function QuickControl() {
             </div>
           )}
 
+          {/* Override Status */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+            <div className="flex items-center space-x-2 mb-2">
+              <Unlock className="h-4 w-4 text-blue-400" />
+              <span className="text-sm font-medium text-blue-400">Manual Override System</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              When you manually set a drone status, the auto-simulation will respect that setting for the duration you specify. 
+              This prevents unrealistic status changes during your demo.
+            </p>
+            <div className="mt-2 text-xs">
+              <span className="text-green-400">Active Overrides: </span>
+              {droneStates.filter(s => s.manualOverride).map(s => s.droneId).join(', ') || 'None'}
+            </div>
+          </div>
+
           {/* Quick Actions */}
           <div>
-            <h3 className="text-lg font-semibold mb-3">Quick Actions</h3>
+            <h3 className="text-lg font-semibold mb-3">Quick Demo Actions</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {quickActions.map((action) => {
                 const Icon = action.icon;
@@ -242,54 +278,40 @@ export function QuickControl() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {DRONES.map((droneId) => {
                 const currentState = droneStates.find(s => s.droneId === droneId);
+                const isOverridden = currentState?.manualOverride;
+                
                 return (
-                  <Card key={droneId} className="bg-secondary/30">
+                  <Card key={droneId} className={`${isOverridden ? 'bg-blue-500/10 border-blue-500/30' : 'bg-secondary/30'}`}>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-base flex items-center justify-between">
                         <span>Drone {droneId}</span>
-                        <div className="text-xs text-muted-foreground">
-                          {currentState?.status || 'Unknown'}
+                        <div className="flex items-center space-x-2">
+                          {isOverridden && <Unlock className="h-3 w-3 text-blue-400" />}
+                          <div className="text-xs text-muted-foreground">
+                            {currentState?.status || 'Unknown'}
+                          </div>
                         </div>
                       </CardTitle>
+                      {isOverridden && (
+                        <p className="text-xs text-blue-400">Manual Override Active</p>
+                      )}
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-3 gap-2">
-                        {DRONE_STATUSES.slice(0, 6).map((status) => {
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        {DRONE_STATUSES.slice(0, 8).map((status) => {
                           const Icon = status.icon;
                           return (
                             <Button
                               key={status.value}
                               onClick={() => updateDroneStatus(droneId, status.value)}
                               disabled={isLoading}
-                              variant="outline"
-                              size="sm"
-                              className="flex flex-col items-center p-2 h-auto text-xs"
+                              className={`${status.color} hover:opacity-80 text-white flex flex-col items-center p-2 h-auto text-xs`}
                             >
                               <Icon className="h-3 w-3 mb-1" />
                               {status.label}
                             </Button>
                           );
                         })}
-                      </div>
-                      
-                      {/* Additional controls */}
-                      <div className="mt-3 flex items-center justify-between text-xs">
-                        <Button
-                          onClick={() => updateDroneStatus(droneId, 'In Flight', { battery: 70 + Math.random() * 20 })}
-                          disabled={isLoading}
-                          size="sm"
-                          className="bg-cyan-600 hover:bg-cyan-700 text-white"
-                        >
-                          Launch Mission
-                        </Button>
-                        <Button
-                          onClick={() => updateDroneStatus(droneId, 'Powered Off', { isOnline: false })}
-                          disabled={isLoading}
-                          size="sm"
-                          variant="destructive"
-                        >
-                          Power Off
-                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -300,10 +322,14 @@ export function QuickControl() {
 
           {/* Instructions */}
           <div className="text-xs text-muted-foreground bg-secondary/20 p-3 rounded-lg">
-            <p className="font-semibold mb-1">Quick Access:</p>
-            <p>• Press <kbd className="px-1 py-0.5 bg-secondary rounded">Ctrl+Shift+A</kbd> to toggle this panel</p>
-            <p>• Press <kbd className="px-1 py-0.5 bg-secondary rounded">Escape</kbd> to hide</p>
-            <p>• Changes are reflected instantly on the dashboard</p>
+            <p className="font-semibold mb-2">How Manual Override Works:</p>
+            <ul className="space-y-1 list-disc list-inside">
+              <li>Set any drone status manually - it will stay that way for the duration you specify</li>
+              <li>Auto-simulation will skip overridden drones to prevent conflicts</li>
+              <li>Override expires automatically, then normal simulation resumes</li>
+              <li>Blue indicators show which drones are under manual control</li>
+              <li>Press <kbd className="px-1 py-0.5 bg-secondary rounded">Ctrl+Shift+A</kbd> to toggle this panel</li>
+            </ul>
           </div>
         </CardContent>
       </Card>

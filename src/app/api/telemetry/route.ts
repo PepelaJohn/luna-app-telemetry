@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     await connectDB();
     
     const telemetryData = await request.json();
-    
+    console.log(telemetryData)
     // Validate required fields
     const requiredFields = ['droneId', 'battery', 'temperature', 'humidity', 'speed', 'altitude', 'lat', 'lng', 'status'];
     const missingFields = requiredFields.filter(field => !(field in telemetryData));
