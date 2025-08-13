@@ -47,14 +47,14 @@ The Lunadrone Dashboard is a professional-grade telemetry monitoring and fleet m
 ## Quick Start Guide
 
 ### Prerequisites
-- Node.js 18+ and npm/yarn
+- Node.js 18+ and pnpm/yarn
 - MongoDB (local or Atlas)
 
 ### 1. Clone and Install
 ```bash
 git clone https://github.com/PepelaJohn/luna-app-telemetry
-cd lunadrone-dashboard
-npm install
+cd luna-app-telemetry
+pnpm install
 ```
 
 ### 2. Configure Environment
@@ -65,7 +65,7 @@ cp .env.example .env.local
 
 ### 3. Start Development Server
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### 4. Access Dashboard
@@ -946,7 +946,7 @@ curl -X POST "http://localhost:3000/api/admin/drone-control" \
 
 2. **Install Dependencies**
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. **Configure Environment**
@@ -957,7 +957,7 @@ curl -X POST "http://localhost:3000/api/admin/drone-control" \
 
 4. **Start Development Server**
    ```bash
-   npm run dev
+   pnpm  dev
    ```
 
 #### Code Structure Guidelines
