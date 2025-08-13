@@ -49,6 +49,7 @@ The Lunadrone Dashboard is a professional-grade telemetry monitoring and fleet m
 ### Prerequisites
 - Node.js 18+ and pnpm/yarn
 - MongoDB (local or Atlas)
+- New to Next Js? [Start here](https://github.com/PepelaJohn/luna-app-telemetry/blob/main/migration-to-next-api.md)
 
 ### 1. Clone and Install
 ```bash
